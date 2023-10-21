@@ -73,18 +73,17 @@ app.post("/products", upload.single("image"), async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-app.post("/register", async (req, res) => {
-  try {
-    const { username, email, password, phone, state, pincode, country } =
-      req.body;
 
+
+
+app.post('/register', async (req, res) => {
+  try {
+    const { username, email, password, phone, state, pincode, country } = req.body;
     // Check if the user already exists (based on email)
     const existingUser = await UsersModel.findOne({ email });
 
     if (existingUser) {
-      return res
-        .status(400)
-        .json({ error: "User with this email already exists" });
+      return res.status(400).json({ error: 'User with this email already exists' });
     }
 
     // Create a new user
@@ -98,20 +97,27 @@ app.post("/register", async (req, res) => {
       country,
     });
 
+    // If a profile picture was uploaded, store its path
+ 
     await user.save();
 
-    res.status(201).json({ message: "User registered successfully" });
+    res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
     console.error(error); // Log the error
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
+
+
+
 
 
 // API endpoint to send OTP
 app.post("/sendOTP", async (req, res) => {
   const accountSid = "ACe3e8a0c5012984c57f28389d766dc89d";
-  const authToken = "c8f57aa3a08adf1d357d87b62c499388";
+  const authToken = "aaf04779563a61e1aab0e4acf9d07abf";
   // Create a Twilio client
   const client = twilio(accountSid, authToken);
   const { phoneNumber } = req.body;
@@ -268,7 +274,8 @@ app.put("/products/:id", async (req, res) => {
   }
 });
 
-// stripe payment
+
+
 const stripe = require("stripe")(
   "sk_test_51O1DHFSENxkdHNp7UIpMFr6JFZF1OVYrY60cdGCby6oe2DZeJKEjEEmz0YzzNALoLXrKKEdUuGhsY2Z7M3wiH1cj00iivjlrVM"
 );
@@ -285,11 +292,16 @@ app.post("/create-checkout-session", async (req, res) => {
         },
       ],
       mode: "payment",
-      success_url: "http://localhost:3000/Success", 
-      cancel_url: "http://localhost:3000/checkout", 
+      success_url: "http://localhost:3000/Success?session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: "http://localhost:3000/checkout",
     });
 
-    res.json({ url: session.url });
+    // Retrieve the Payment Intent ID from the session
+    const paymentIntentId = session.payment_intent;
+    console.log(paymentIntentId);
+    
+    res.json({ url: session.url, paymentIntentId: paymentIntentId });
+    
   } catch (error) {
     console.error("Error creating Stripe session:", error);
     res.status(500).json({ error: "Session creation failed" });
@@ -299,32 +311,43 @@ app.post("/create-checkout-session", async (req, res) => {
 
 
 
+
 // booking database
 app.post("/new-booking", async (req, res) => {
+  const { productId,productName, price,userName, shippingAddress } = req.body;
+
   try {
-    const { productName, price, userName, shippingAddress } = req.body;
+    // Find the product by ID
+    const product = await Product.findById(productId);
 
-    const item = new Booking({
-      productName,
-      price,
-      userName,
-      shippingAddress,
-    });
-
-    // Validate and save the document
-    await item.validate();
-    await item.save();
-
-    res.status(201).json({ message: "Booked" });
-  } catch (error) {
-    if (error.errors) {
-      // Handle validation errors
-      const validationErrors = {};
-      for (const key in error.errors) {
-        validationErrors[key] = error.errors[key].message;
-      }
-      return res.status(400).json({ errors: validationErrors });
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
     }
+
+    if (product.quantity > 0) {
+      // Decrease the quantity by 1
+      product.quantity--;
+
+      // Save the updated product with reduced quantity
+      await product.save();
+
+      // Create a new booking record
+      const booking = new Booking({
+        productId,
+        productName,
+        price,
+        userName,
+        shippingAddress,
+        bookingDate: new Date(),
+      });
+
+      await booking.save();
+
+      res.status(201).json({ message: "Product booked and quantity updated" });
+    } else {
+      res.status(400).json({ error: "Product is out of stock" });
+    }
+  } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal server error" });
   }
@@ -343,6 +366,92 @@ app.get('/bookings', async (req, res) => {
 });
 
 
+
+  // fetching products to cart
+  // app.get("/cart/:username", async (req, res) => {
+  //   try {
+  //     const username = req.params.username; // Get the username from the URL parameter
+  
+  //     console.log("Received request for username: " + username);
+  
+  //     // Fetch all bookings that match the provided username
+  //     const bookings = await Booking.find({ username });
+  
+  //     console.log("Found bookings:", bookings);
+  
+  //     if (bookings.length === 0) {
+  //       console.log("No bookings found for this user.");
+  //       return res.status(404).json({ message: "No bookings found for this user" });
+  //     }
+      
+  //     console.log("Sending bookings data in response.");
+  //     res.status(200).json(bookings);
+  //   } catch (error) {
+  //     console.error("Error:", error);
+  //     res.status(500).json({ error: "Internal server error" });
+  //   }
+  // });
+  
+
+
+
+  app.get('/cart/:username', async (req, res) => {
+    try {
+      const username = req.params.username;
+  
+      // Use the Mongoose model to find all bookings with the provided username
+      const bookings = await Booking.find({ userName: username });
+  
+      if (bookings.length === 0) {
+        return res.status(404).json({ message: 'No bookings found for this user' });
+      }
+  
+      res.status(200).json(bookings);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+
+
+  
+// API route to cancel an order and issue a refund
+app.post('/cancel-booking/:bookingId', async (req, res) => {
+  const bookingId = req.params.bookingId;
+
+  try {
+    // Retrieve the booking details from your database using the orderId.
+    const booking = await Booking.findById(orderId);
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    // Check if the payment intent or payment method ID is present in the booking.
+    if (!booking.stripePaymentIntentId) {
+      return res.status(400).json({ error: 'Payment intent not found in booking' });
+    }
+
+    // Use the Stripe API to refund the payment.
+    const refund = await stripe.refunds.create({
+      payment_intent: booking.stripePaymentIntentId,
+    });
+
+    // Handle the refund status and update the booking status in your database.
+    if (refund.status === 'succeeded') {
+      // Update the booking status to "canceled" or a suitable status in your database.
+      await Booking.findByIdAndUpdate(orderId, { status: 'canceled' });
+
+      return res.status(200).json({ message: 'Order canceled and refunded successfully' });
+    } else {
+      return res.status(500).json({ error: 'Refund failed' });
+    }
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
